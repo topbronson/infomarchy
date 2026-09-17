@@ -14,6 +14,11 @@ Item {
   property var snap: ({})
   property bool ready: false
   property string error: ""
+  property alias hardware: hardwareMonitor
+  HardwareModel {
+    id: hardwareMonitor
+    active: root.active && !root.demoMode
+  }
   // Resolve the script itself so a missing trailing slash on a directory URL
   // cannot produce ".../nixfred.infomarchicollector.ts".
   property string collectorPath: Qt.resolvedUrl("collector.ts").toString().replace(/^file:\/\//, "")

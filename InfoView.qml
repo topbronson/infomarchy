@@ -1920,44 +1920,56 @@ Item {
           readonly property var disks: view.machine.disks || []
           readonly property var bat: view.machine.battery
           id: mc
-          // Cockpit density: two meters per row, one footer line for the scalars.
-          // Seven single-line rows used to push BAT off the bottom of a 1080p desk.
-          GridLayout {
+          Column {
             width: parent.width
-            columns: 2
-            columnSpacing: Style.spacing.lg
-            rowSpacing: Style.spacing.sm
-            Meter { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "CPU"; value: view.desk.pct(mc.cpu.pct) + " · " + ((mc.cpu.load || [0])[0] || 0).toFixed(2) + (view.machine.temp ? " · " + Math.round(view.machine.temp) + "°" : ""); fraction: (mc.cpu.pct || 0) / 100; tone: (mc.cpu.pct || 0) > 85 ? view.desk.red : view.desk.blue }
-            Meter { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "RAM"; value: view.desk.bytes(mc.mem.used) + "/" + view.desk.bytes(mc.mem.total) + " · " + view.desk.pct(mc.mem.pct); fraction: (mc.mem.pct || 0) / 100; tone: (mc.mem.pct || 0) > 90 ? view.desk.red : view.desk.green }
-            Repeater {
-              model: mc.disks.slice(0, 2)
-              delegate: Meter { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; label: "DISK " + modelData.mount; value: view.desk.bytes(modelData.used) + "/" + view.desk.bytes(modelData.size) + " · " + view.desk.pct(modelData.pct); fraction: (modelData.pct || 0) / 100; tone: (modelData.pct || 0) > 90 ? view.desk.red : view.desk.yellow }
+            spacing: Style.spacing.sm
+            // Cockpit density: two meters per row, one footer line for the scalars.
+            // Seven single-line rows used to push BAT off the bottom of a 1080p desk.
+            GridLayout {
+              width: parent.width
+              columns: 2
+              columnSpacing: Style.spacing.lg
+              rowSpacing: Style.spacing.sm
+              Meter { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "CPU"; value: view.desk.pct(mc.cpu.pct) + " · " + ((mc.cpu.load || [0])[0] || 0).toFixed(2) + (view.machine.temp ? " · " + Math.round(view.machine.temp) + "°" : ""); fraction: (mc.cpu.pct || 0) / 100; tone: (mc.cpu.pct || 0) > 85 ? view.desk.red : view.desk.blue }
+              Meter { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "RAM"; value: view.desk.bytes(mc.mem.used) + "/" + view.desk.bytes(mc.mem.total) + " · " + view.desk.pct(mc.mem.pct); fraction: (mc.mem.pct || 0) / 100; tone: (mc.mem.pct || 0) > 90 ? view.desk.red : view.desk.green }
+              Repeater {
+                model: mc.disks.slice(0, 2)
+                delegate: Meter { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; label: "DISK " + modelData.mount; value: view.desk.bytes(modelData.used) + "/" + view.desk.bytes(modelData.size) + " · " + view.desk.pct(modelData.pct); fraction: (modelData.pct || 0) / 100; tone: (modelData.pct || 0) > 90 ? view.desk.red : view.desk.yellow }
+              }
+              Meter {
+                Layout.fillWidth: true; Layout.preferredWidth: 1
+                label: mc.net.wireless ? "WIFI " + (mc.net.ssid || "") : "NET " + (mc.net.dev || "—")
+                value: mc.net.signal !== null && mc.net.signal !== undefined ? mc.net.signal + " dBm" : (mc.net.dev ? "up" : "—")
+                // -30 dBm great … -90 dBm dead
+                fraction: mc.net.signal !== null && mc.net.signal !== undefined ? Math.max(0, Math.min(1, (Number(mc.net.signal) + 90) / 60)) : (mc.net.dev ? 1 : 0)
+                tone: mc.net.signal !== null && mc.net.signal !== undefined && Number(mc.net.signal) < -75 ? view.desk.yellow : view.desk.green
+              }
+              // Scalars on two footer lines: addresses, then rates · ping · battery.
+              RowLayout {
+                Layout.columnSpan: 2
+                Layout.fillWidth: true
+                spacing: Style.spacing.md
+                PlainText { text: "WAN " + (view.machine.externalIp || "—"); color: view.machine.externalIp ? view.desk.cyan : view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
+                PlainText { visible: !!mc.net.addr; text: "LAN " + (mc.net.addr || ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
+                Item { Layout.fillWidth: true }
+              }
+              RowLayout {
+                Layout.columnSpan: 2
+                Layout.fillWidth: true
+                spacing: Style.spacing.md
+                PlainText { text: "↓" + view.desk.rate(mc.net.rxRate) + " ↑" + view.desk.rate(mc.net.txRate); color: view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true }
+                PlainText { text: "⇄ " + (mc.ping.ok ? mc.ping.ms.toFixed(0) + " ms" : "timeout"); color: !mc.ping.ok ? view.desk.red : mc.ping.ms > 80 ? view.desk.yellow : view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true }
+                Item { Layout.fillWidth: true }
+                PlainText { visible: !!mc.bat; text: mc.bat ? "BAT " + mc.bat.pct + "% " + String(mc.bat.status || "").toLowerCase() : ""; color: mc.bat && mc.bat.pct < 20 && mc.bat.status !== "Charging" ? view.desk.red : view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
+              }
             }
-            Meter {
-              Layout.fillWidth: true; Layout.preferredWidth: 1
-              label: mc.net.wireless ? "WIFI " + (mc.net.ssid || "") : "NET " + (mc.net.dev || "—")
-              value: mc.net.signal !== null && mc.net.signal !== undefined ? mc.net.signal + " dBm" : (mc.net.dev ? "up" : "—")
-              // -30 dBm great … -90 dBm dead
-              fraction: mc.net.signal !== null && mc.net.signal !== undefined ? Math.max(0, Math.min(1, (Number(mc.net.signal) + 90) / 60)) : (mc.net.dev ? 1 : 0)
-              tone: mc.net.signal !== null && mc.net.signal !== undefined && Number(mc.net.signal) < -75 ? view.desk.yellow : view.desk.green
-            }
-            // Scalars on two footer lines: addresses, then rates · ping · battery.
-            RowLayout {
-              Layout.columnSpan: 2
-              Layout.fillWidth: true
-              spacing: Style.spacing.md
-              PlainText { text: "WAN " + (view.machine.externalIp || "—"); color: view.machine.externalIp ? view.desk.cyan : view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
-              PlainText { visible: !!mc.net.addr; text: "LAN " + (mc.net.addr || ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
-              Item { Layout.fillWidth: true }
-            }
-            RowLayout {
-              Layout.columnSpan: 2
-              Layout.fillWidth: true
-              spacing: Style.spacing.md
-              PlainText { text: "↓" + view.desk.rate(mc.net.rxRate) + " ↑" + view.desk.rate(mc.net.txRate); color: view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true }
-              PlainText { text: "⇄ " + (mc.ping.ok ? mc.ping.ms.toFixed(0) + " ms" : "timeout"); color: !mc.ping.ok ? view.desk.red : mc.ping.ms > 80 ? view.desk.yellow : view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true }
-              Item { Layout.fillWidth: true }
-              PlainText { visible: !!mc.bat; text: mc.bat ? "BAT " + mc.bat.pct + "% " + String(mc.bat.status || "").toLowerCase() : ""; color: mc.bat && mc.bat.pct < 20 && mc.bat.status !== "Charging" ? view.desk.red : view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
+            HardwarePanel {
+              width: parent.width
+              visible: !view.desk.demoMode
+              monitor: view.desk.hardware
+              desk: view.desk
+              style: Style
+              interactivePanel: view.interactive
             }
           }
         }

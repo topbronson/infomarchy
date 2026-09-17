@@ -24,6 +24,9 @@ import { join } from "path";
 // Verified — the same injection took InfoModel from 5 to 6.
 const CEILINGS: Record<string, number> = {
   "BackgroundWallpaper.qml": 0,
+  // Quickshell's QProcess::ExitStatus type is not exposed to qmllint.
+  "HardwareModel.qml": 1,
+  "HardwarePanel.qml": 0,
   "Infomarchy.qml": 26,
   "InfoModel.qml": 5,
   "InfoSettings.qml": 0,
