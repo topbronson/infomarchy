@@ -21,7 +21,7 @@ test("machine card has bounded scrolling per-host rows, GPU identity and freshne
   // collapse the entire machine card's implicit height.
   expect(read("InfoView.qml")).toMatch(/id: mc\s+Column\s*\{/);
   const source = read("HardwarePanel.qml");
-  for (const marker of ["Flickable", "lastSuccess", "lastAttempt", "stale", "gpus", "modelData.id", 'textFormat: Text.PlainText'])
+  for (const marker of ["Flickable", "component Bar", "stale", "gpus", "modelData.id", "GPU ", "CPU", "RAM", 'textFormat: Text.PlainText'])
     expect(source).toContain(marker);
 });
 

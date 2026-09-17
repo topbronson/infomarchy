@@ -3,11 +3,17 @@
 
 Reports CPU, memory, disks, and GPUs. Designed to run locally or piped over SSH
 to a remote host (the monitor streams this file's bytes to `python3 -`).
+
+GPU sources, in order of preference per card:
+  - NVIDIA: nvidia-smi (util, VRAM, temp)
+  - Intel/AMD discrete (xe/amdgpu): nvtop --snapshot (util, VRAM, temp)
+  - Integrated (i915): nvtop --snapshot (util, temp only; VRAM is shared system
+    memory, so it is not reported as a discrete VRAM figure)
+  - Fallback: /sys (PCI identity + temp only)
 """
 import csv
 import json
 import math
-import os
 import re
 import shutil
 import subprocess
@@ -28,6 +34,26 @@ def number(value):
         return n if math.isfinite(n) and n >= 0 else None
     except (ValueError, TypeError):
         return None
+
+
+def pct(value):
+    """Parse '42%' / '42' / None -> 42.0 or None."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s.endswith('%'):
+        s = s[:-1]
+    return number(s)
+
+
+def celsius(value):
+    """Parse '56C' / '56' / None -> 56.0 or None."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s.endswith('C'):
+        s = s[:-1]
+    return number(s)
 
 
 # Human names for common PCI vendor:device pairs. Anything not listed falls back
@@ -51,7 +77,32 @@ def gpu_name(vendor, device):
     return VENDOR_NAMES.get(vendor, vendor) + ' ' + device
 
 
-def gpus(sys=Path('/sys'), nvidia_text=None):
+def nvtop_gpus():
+    """Return a list of {util, memUsed, memTotal, temp} in nvtop enumeration
+    order (which matches PCI order). Empty if nvtop is missing or errors."""
+    try:
+        result = subprocess.run(['nvtop', '--snapshot'], capture_output=True, text=True, timeout=3)
+        if result.returncode != 0:
+            return []
+        data = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    rows = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        rows.append(dict(
+            util=pct(d.get('gpu_util')),
+            memUsed=number(d.get('mem_used')),
+            memTotal=number(d.get('mem_total')),
+            temp=celsius(d.get('temp')),
+        ))
+    return rows
+
+
+def gpus(sys=Path('/sys'), nvidia_text=None, nvtop_rows=None):
     rows = {}
     for card in sorted((sys / 'class/drm').glob('card*')):
         if not re.fullmatch(r'card\d+', card.name):
@@ -65,9 +116,9 @@ def gpus(sys=Path('/sys'), nvidia_text=None):
         temps = [n / 1000 for n in temps if n is not None]
         rows[pci] = dict(id=pci, name=gpu_name(vendor, text(device / 'device')),
                          driver=(device / 'driver').resolve().name if (device / 'driver').exists() else None,
-                         util=number(text(device / 'gpu_busy_percent')),
-                         memUsed=number(text(device / 'mem_info_vram_used')),
-                         memTotal=number(text(device / 'mem_info_vram_total')),
+                         util=None,
+                         memUsed=None,
+                         memTotal=None,
                          temp=max(temps) if temps else None)
     if nvidia_text is None:
         try:
@@ -89,6 +140,26 @@ def gpus(sys=Path('/sys'), nvidia_text=None):
                          memUsed=used * 1048576 if used is not None else None,
                          memTotal=total * 1048576 if total is not None else None,
                          temp=number(temp))
+    # Overlay nvtop data for non-NVIDIA cards, by index (nvtop enumerates in the
+    # same PCI order as the /sys scan). Integrated GPUs (i915) get util+temp only;
+    # their "VRAM" is shared system memory, not a discrete figure.
+    if nvtop_rows is None:
+        nvtop_rows = nvtop_gpus()
+    idx = 0
+    for pci in sorted(rows.keys()):
+        row = rows[pci]
+        if row['driver'] != 'nvidia' and idx < len(nvtop_rows):
+            nv = nvtop_rows[idx]
+            if row['util'] is None:
+                row['util'] = nv['util']
+            if row['temp'] is None:
+                row['temp'] = nv['temp']
+            if row['driver'] in ('xe', 'amdgpu'):
+                if row['memUsed'] is None:
+                    row['memUsed'] = nv['memUsed']
+                if row['memTotal'] is None:
+                    row['memTotal'] = nv['memTotal']
+        idx += 1
     return sorted(rows.values(), key=lambda row: row['id'])
 
 
@@ -106,7 +177,6 @@ def disks(mounts_text=None):
         mount = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), mount)
         if dev.startswith('/dev/loop') or fstype == 'squashfs' or mount.startswith('/snap/'):
             continue
-        # Keep the highest (shortest) mount point per device; '/' wins.
         if dev in chosen:
             if len(mount) < len(chosen[dev]):
                 chosen[dev] = mount

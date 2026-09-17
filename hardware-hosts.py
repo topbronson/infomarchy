@@ -161,7 +161,7 @@ class Monitor:
                 del self.pending[key]
             if key not in self.pending and now >= self.due.get(key, 0):
                 self.pending[key] = self.executor.submit(collect, state.host)
-                self.due[key] = now + (4 if key == 'local' else 15)
+                self.due[key] = now + 5
 
     def rows(self, now):
         return [state.view(now) for state in self.states]
