@@ -3,10 +3,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Per-host hardware meters, styled to match the MACHINE card's Meter bars.
-// One compact bar per metric (CPU, RAM, disks, GPUs) with a label + value row
-// and a colored fill. No per-host "updated at" text — freshness is shown only
-// as a status dot on the host header.
+// Remote-host hardware meters, styled to match the MACHINE card Meter bars.
+// The LOCAL host is intentionally NOT shown here: its CPU/RAM/disk already live
+// in the cockpit above, and its discrete GPUs are rendered directly in the
+// cockpit grid (InfoView.qml). This panel only adds remote hosts (e.g.
+// spark-station), each with its own CPU/RAM/disk/GPU meters.
+// No per-host "updated at" text - freshness is a status dot on the host header.
 Flickable {
   id: root
   required property var monitor
@@ -25,7 +27,7 @@ Flickable {
   function pct(value) { return value === null || value === undefined ? "—" : Math.round(Number(value)) + "%" }
 
   // A single meter: label + value on top, colored fill bar below. Mirrors the
-  // MACHINE card's Meter component so the two read as one system.
+  // MACHINE card Meter component so the two read as one system.
   component Bar: Item {
     required property string label
     required property string value
@@ -59,8 +61,9 @@ Flickable {
     width: root.width - 12
     spacing: root.style.spacing.md
 
+    // Remote hosts only: the local host (id "local") is rendered in the cockpit.
     Repeater {
-      model: root.monitor.hosts
+      model: (root.monitor.hosts || []).filter(function (h) { return h.id !== "local" })
       delegate: Column {
         id: hostBlock
         required property var modelData
@@ -114,7 +117,7 @@ Flickable {
           fraction: Number(hostBlock.mem.total) > 0 ? Number(hostBlock.mem.used) / Number(hostBlock.mem.total) : 0
           tone: (Number(hostBlock.mem.total) > 0 && Number(hostBlock.mem.used) / Number(hostBlock.mem.total) > 0.9) ? root.desk.red : root.desk.green
         }
-        // Disks (top 2, matching the MACHINE card)
+        // Disks (top 2, matching the cockpit)
         Repeater {
           model: hostBlock.disks.slice(0, 2)
           delegate: Bar {
@@ -126,15 +129,16 @@ Flickable {
             tone: (Number(modelData.total) > 0 && Number(modelData.used) / Number(modelData.total) > 0.9) ? root.desk.red : root.desk.yellow
           }
         }
-        // GPUs — one bar each, so both B70s are distinct
+        // GPUs - one bar each; bar = VRAM headroom. Unified-memory GPUs (no
+        // discrete VRAM) drop the VRAM segment and fall back to util for the bar.
         Repeater {
           model: hostBlock.gpus
           delegate: Bar {
             required property var modelData
             visible: !!hostBlock.modelData.stats
             label: "GPU " + modelData.id + " " + modelData.name
-            value: root.pct(modelData.util) + " · " + root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
-            fraction: Number(modelData.memTotal) > 0 ? Number(modelData.memUsed) / Number(modelData.memTotal) : ((Number(modelData.util) || 0) / 100)
+            value: root.pct(modelData.util) + (modelData.memTotal ? " · " + root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
+            fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : ((Number(modelData.util) || 0) / 100)
             tone: root.desk.green
           }
         }

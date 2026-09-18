@@ -1919,6 +1919,9 @@ Item {
           readonly property var ping: view.machine.ping || ({})
           readonly property var disks: view.machine.disks || []
           readonly property var bat: view.machine.battery
+          // Local host from the hardware monitor: its discrete GPUs join the cockpit
+          // (the cockpit already shows local CPU/RAM/disk, so the panel omits them).
+          readonly property var hw: ((view.desk.hardware || {}).hosts || [])[0] || ({})
           id: mc
           Column {
             width: parent.width
@@ -1932,6 +1935,20 @@ Item {
               rowSpacing: Style.spacing.sm
               Meter { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "CPU"; value: view.desk.pct(mc.cpu.pct) + " · " + ((mc.cpu.load || [0])[0] || 0).toFixed(2) + (view.machine.temp ? " · " + Math.round(view.machine.temp) + "°" : ""); fraction: (mc.cpu.pct || 0) / 100; tone: (mc.cpu.pct || 0) > 85 ? view.desk.red : view.desk.blue }
               Meter { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "RAM"; value: view.desk.bytes(mc.mem.used) + "/" + view.desk.bytes(mc.mem.total) + " · " + view.desk.pct(mc.mem.pct); fraction: (mc.mem.pct || 0) / 100; tone: (mc.mem.pct || 0) > 90 ? view.desk.red : view.desk.green }
+              // Local discrete GPUs (iGPU omitted): each is a normal grid cell, so the
+              // two cards sit side by side at half width, matching the other meters.
+              // Bar = VRAM headroom.
+              Repeater {
+                model: ((mc.hw.stats || {}).gpus || []).filter(function (g) { return g.driver !== "i915" })
+                delegate: Meter {
+                  required property var modelData
+                  Layout.fillWidth: true; Layout.preferredWidth: 1
+                  label: "GPU " + modelData.id + " " + modelData.name
+                  value: view.desk.pct(modelData.util) + (modelData.memTotal ? " · " + view.desk.bytes(modelData.memUsed) + "/" + view.desk.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
+                  fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : (Number(modelData.util) || 0) / 100
+                  tone: view.desk.green
+                }
+              }
               Repeater {
                 model: mc.disks.slice(0, 2)
                 delegate: Meter { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; label: "DISK " + modelData.mount; value: view.desk.bytes(modelData.used) + "/" + view.desk.bytes(modelData.size) + " · " + view.desk.pct(modelData.pct); fraction: (modelData.pct || 0) / 100; tone: (modelData.pct || 0) > 90 ? view.desk.red : view.desk.yellow }
