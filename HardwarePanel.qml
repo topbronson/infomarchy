@@ -3,12 +3,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Remote-host hardware meters, styled to match the MACHINE card Meter bars.
-// The LOCAL host is intentionally NOT shown here: its CPU/RAM/disk already live
-// in the cockpit above, and its discrete GPUs are rendered directly in the
-// cockpit grid (InfoView.qml). This panel only adds remote hosts (e.g.
-// spark-station), each with its own CPU/RAM/disk/GPU meters.
-// No per-host "updated at" text - freshness is a status dot on the host header.
+// Remote-host hardware meters, styled to match the MACHINE card cockpit.
+// The LOCAL host is intentionally NOT shown here: its CPU/RAM/disk/GPU already
+// live in the cockpit above. This panel adds remote hosts (e.g. spark-station),
+// each rendered as a 2-column grid of half-width meters (like the cockpit) with
+// a "user@hostname · up <dur>" header and a WAN/LAN + rates/ping footer.
+// No per-host "updated at" text - freshness is a status dot on the header.
 Flickable {
   id: root
   required property var monitor
@@ -74,10 +74,13 @@ Flickable {
         readonly property var gpus: hostBlock.stats.gpus || []
         readonly property bool offline: modelData.status === "offline"
         readonly property bool stale: modelData.stale || root.monitor.stale
+        // "user@hostname" like the cockpit's "top-bronson@omarchy-station".
+        readonly property string hostName: hostBlock.stats.hostname || hostBlock.modelData.label
+        readonly property string headerText: (hostBlock.modelData.user ? hostBlock.modelData.user + "@" + hostBlock.hostName : hostBlock.hostName)
         width: rows.width
         spacing: root.style.spacing.xs
 
-        // Host header: name + status dot. No timestamp.
+        // Host header: status dot + user@hostname · up <dur>. No timestamp.
         RowLayout {
           width: parent.width
           spacing: root.style.spacing.xs
@@ -86,7 +89,9 @@ Flickable {
             color: hostBlock.offline ? root.desk.red : (hostBlock.stale ? root.desk.yellow : root.desk.green)
           }
           Text {
-            text: hostBlock.modelData.label + (hostBlock.offline ? " · offline" : (hostBlock.stale ? " · stale" : ""))
+            text: hostBlock.headerText
+              + (hostBlock.stats.uptime ? " · up " + root.desk.dur(hostBlock.stats.uptime) : "")
+              + (hostBlock.offline ? " · offline" : (hostBlock.stale ? " · stale" : ""))
             color: hostBlock.offline ? root.desk.red : (hostBlock.stale ? root.desk.yellow : root.desk.themeForeground)
             textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
             Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
@@ -101,90 +106,84 @@ Flickable {
           opacity: 0.5; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption
         }
 
-        // CPU
-        Bar {
+        // Meters in a 2-column grid so each bar is half-width, matching the cockpit.
+        GridLayout {
           visible: !!hostBlock.modelData.stats
-          label: "CPU"
-          value: root.pct(hostBlock.cpu.pct)
-          fraction: (Number(hostBlock.cpu.pct) || 0) / 100
-          tone: (Number(hostBlock.cpu.pct) || 0) > 85 ? root.desk.red : root.desk.blue
-        }
-        // RAM
-        Bar {
-          visible: !!hostBlock.modelData.stats
-          label: "RAM"
-          value: root.bytes(hostBlock.mem.used) + "/" + root.bytes(hostBlock.mem.total)
-          fraction: Number(hostBlock.mem.total) > 0 ? Number(hostBlock.mem.used) / Number(hostBlock.mem.total) : 0
-          tone: (Number(hostBlock.mem.total) > 0 && Number(hostBlock.mem.used) / Number(hostBlock.mem.total) > 0.9) ? root.desk.red : root.desk.green
-        }
-        // Disks (top 2, matching the cockpit)
-        Repeater {
-          model: hostBlock.disks.slice(0, 2)
-          delegate: Bar {
-            required property var modelData
-            visible: !!hostBlock.modelData.stats
-            label: "DISK " + modelData.mount
-            value: root.bytes(modelData.used) + "/" + root.bytes(modelData.total)
-            fraction: Number(modelData.total) > 0 ? Number(modelData.used) / Number(modelData.total) : 0
-            tone: (Number(modelData.total) > 0 && Number(modelData.used) / Number(modelData.total) > 0.9) ? root.desk.red : root.desk.yellow
-          }
-        }
-        // GPUs - one bar each; bar = VRAM headroom. Unified-memory GPUs (no
-        // discrete VRAM) drop the VRAM segment and fall back to util for the bar.
-        Repeater {
-          model: hostBlock.gpus
-          delegate: Bar {
-            required property var modelData
-            visible: !!hostBlock.modelData.stats
-            label: "GPU " + modelData.id + " " + modelData.name
-            value: root.pct(modelData.util) + (modelData.memTotal ? " · " + root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
-            fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : ((Number(modelData.util) || 0) / 100)
-            tone: root.desk.green
-          }
-        }
-        // No GPUs detected on this host
-        Text {
-          visible: !!hostBlock.modelData.stats && hostBlock.gpus.length === 0
-          text: "GPU · none detected"
-          color: root.desk.themeForeground; opacity: 0.5; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption
-        }
+          width: parent.width
+          columns: 2
+          columnSpacing: root.style.spacing.lg
+          rowSpacing: root.style.spacing.sm
 
-        // Footer: addresses + uptime, then rates · ping (mirrors the cockpit).
-        RowLayout {
-          visible: !!hostBlock.modelData.stats
-          width: parent.width
-          spacing: root.style.spacing.md
-          Text {
-            text: "WAN " + ((hostBlock.stats.net || {}).wan || "—")
-            color: (hostBlock.stats.net || {}).wan ? root.desk.cyan : root.desk.themeForeground
-            opacity: 0.7; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; elide: Text.ElideMiddle
+          Bar { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "CPU"; value: root.pct(hostBlock.cpu.pct); fraction: (Number(hostBlock.cpu.pct) || 0) / 100; tone: (Number(hostBlock.cpu.pct) || 0) > 85 ? root.desk.red : root.desk.blue }
+          Bar { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "RAM"; value: root.bytes(hostBlock.mem.used) + "/" + root.bytes(hostBlock.mem.total); fraction: Number(hostBlock.mem.total) > 0 ? Number(hostBlock.mem.used) / Number(hostBlock.mem.total) : 0; tone: (Number(hostBlock.mem.total) > 0 && Number(hostBlock.mem.used) / Number(hostBlock.mem.total) > 0.9) ? root.desk.red : root.desk.green }
+
+          // Disks (top 2, matching the cockpit).
+          Repeater {
+            model: hostBlock.disks.slice(0, 2)
+            delegate: Bar {
+              required property var modelData
+              Layout.fillWidth: true; Layout.preferredWidth: 1
+              label: "DISK " + modelData.mount
+              value: root.bytes(modelData.used) + "/" + root.bytes(modelData.total)
+              fraction: Number(modelData.total) > 0 ? Number(modelData.used) / Number(modelData.total) : 0
+              tone: (Number(modelData.total) > 0 && Number(modelData.used) / Number(modelData.total) > 0.9) ? root.desk.red : root.desk.yellow
+            }
           }
-          Text {
-            visible: !!(hostBlock.stats.net || {}).addr
-            text: "LAN " + (hostBlock.stats.net || {}).addr
-            color: root.desk.themeForeground; opacity: 0.6; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; elide: Text.ElideMiddle
+
+          // GPUs - one bar each; bar = VRAM headroom. Unified-memory GPUs (no
+          // discrete VRAM) drop the VRAM segment and fall back to util for the bar.
+          Repeater {
+            model: hostBlock.gpus
+            delegate: Bar {
+              required property var modelData
+              Layout.fillWidth: true; Layout.preferredWidth: 1
+              label: "GPU " + modelData.id + " " + modelData.name
+              value: root.pct(modelData.util) + (modelData.memTotal ? " · " + root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
+              fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : ((Number(modelData.util) || 0) / 100)
+              tone: root.desk.green
+            }
           }
+
+          // No GPUs detected on this host.
           Text {
-            visible: hostBlock.stats.uptime !== null && hostBlock.stats.uptime !== undefined
-            text: "up " + root.desk.dur(hostBlock.stats.uptime)
-            color: root.desk.themeForeground; opacity: 0.6; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption
+            Layout.columnSpan: 2; Layout.fillWidth: true
+            visible: hostBlock.gpus.length === 0
+            text: "GPU · none detected"
+            color: root.desk.themeForeground; opacity: 0.5; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption
           }
-          Item { Layout.fillWidth: true }
-        }
-        RowLayout {
-          visible: !!hostBlock.modelData.stats
-          width: parent.width
-          spacing: root.style.spacing.md
-          Text {
-            text: "↓" + root.desk.rate(hostBlock.modelData.netRate ? hostBlock.modelData.netRate[0] : null) + " ↑" + root.desk.rate(hostBlock.modelData.netRate ? hostBlock.modelData.netRate[1] : null)
-            color: root.desk.green; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
+
+          // Footer line 1: WAN / LAN (mirrors the cockpit).
+          RowLayout {
+            Layout.columnSpan: 2; Layout.fillWidth: true
+            spacing: root.style.spacing.md
+            Text {
+              text: "WAN " + ((hostBlock.stats.net || {}).wan || "—")
+              color: (hostBlock.stats.net || {}).wan ? root.desk.cyan : root.desk.themeForeground
+              opacity: 0.7; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; elide: Text.ElideMiddle
+            }
+            Text {
+              visible: !!(hostBlock.stats.net || {}).addr
+              text: "LAN " + (hostBlock.stats.net || {}).addr
+              color: root.desk.themeForeground; opacity: 0.6; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; elide: Text.ElideMiddle
+            }
+            Item { Layout.fillWidth: true }
           }
-          Text {
-            text: "⇄ " + (((hostBlock.stats.ping || {}).ok) ? ((hostBlock.stats.ping || {}).ms).toFixed(0) + " ms" : "timeout")
-            color: !((hostBlock.stats.ping || {}).ok) ? root.desk.red : (((hostBlock.stats.ping || {}).ms || 0) > 80 ? root.desk.yellow : root.desk.green)
-            textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
+
+          // Footer line 2: rates · ping (mirrors the cockpit).
+          RowLayout {
+            Layout.columnSpan: 2; Layout.fillWidth: true
+            spacing: root.style.spacing.md
+            Text {
+              text: "↓" + root.desk.rate(hostBlock.modelData.netRate ? hostBlock.modelData.netRate[0] : null) + " ↑" + root.desk.rate(hostBlock.modelData.netRate ? hostBlock.modelData.netRate[1] : null)
+              color: root.desk.green; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
+            }
+            Text {
+              text: "⇄ " + (((hostBlock.stats.ping || {}).ok) ? ((hostBlock.stats.ping || {}).ms).toFixed(0) + " ms" : "timeout")
+              color: !((hostBlock.stats.ping || {}).ok) ? root.desk.red : (((hostBlock.stats.ping || {}).ms || 0) > 80 ? root.desk.yellow : root.desk.green)
+              textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
+            }
+            Item { Layout.fillWidth: true }
           }
-          Item { Layout.fillWidth: true }
         }
       }
     }

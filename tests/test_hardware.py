@@ -90,7 +90,7 @@ class HardwareTests(unittest.TestCase):
         probe = self.load()
         self.assertTrue(hasattr(probe, 'snapshot'), 'snapshot entry point required')
         sample = probe.snapshot()
-        self.assertEqual(set(sample), {'cpu', 'mem', 'disks', 'gpus', 'uptime', 'net', 'ping'})
+        self.assertEqual(set(sample), {'cpu', 'mem', 'disks', 'gpus', 'uptime', 'net', 'ping', 'hostname'})
         self.assertGreater(sample['mem']['total'], 0)
         self.assertTrue(sample['disks'])
         self.assertGreaterEqual(sample['cpu']['pct'], 0)

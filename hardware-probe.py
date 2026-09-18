@@ -271,6 +271,20 @@ def external_ip():
     return None
 
 
+def hostname():
+    try:
+        import socket
+        name = socket.gethostname().strip()
+        if name:
+            return name[:256]
+    except OSError:
+        pass
+    try:
+        return text(Path("/etc/hostname")).splitlines()[0].strip()[:256]
+    except (OSError, IndexError):
+        return None
+
+
 def uptime():
     try:
         return float(text(Path("/proc/uptime")).split()[0])
@@ -301,7 +315,8 @@ def snapshot():
     return dict(cpu=dict(pct=pct),
                 mem=dict(total=total, used=total - available if total is not None and available is not None else None),
                 disks=disks(), gpus=gpus()[:16],
-                uptime=uptime(), net=net_info(), ping=ping())
+                uptime=uptime(), net=net_info(), ping=ping(),
+                hostname=hostname())
 
 
 if __name__ == '__main__':

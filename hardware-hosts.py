@@ -68,7 +68,7 @@ def validate_stats(stats):
         if not isinstance(value, str) or len(value) > 256 or any(ord(c) < 32 for c in value):
             raise ValueError('Invalid hardware label')
 
-    if not isinstance(stats, dict) or set(stats) != {'cpu', 'mem', 'disks', 'gpus', 'uptime', 'net', 'ping'}:
+    if not isinstance(stats, dict) or set(stats) != {'cpu', 'mem', 'disks', 'gpus', 'uptime', 'net', 'ping', 'hostname'}:
         raise ValueError('Not a hardware-only snapshot')
     metrics(stats['cpu'], ['pct'])
     metrics(stats['mem'], ['used', 'total'])
@@ -95,6 +95,8 @@ def validate_stats(stats):
             raise ValueError('Invalid GPU percentage')
     if stats['uptime'] is not None and (type(stats['uptime']) not in (int, float) or not math.isfinite(stats['uptime']) or stats['uptime'] < 0):
         raise ValueError('Invalid uptime')
+    if stats['hostname'] is not None:
+        label(stats['hostname'])
     net = stats['net']
     if not isinstance(net, dict) or set(net) != {'dev', 'addr', 'wan', 'rx', 'tx', 'wireless', 'ssid', 'signal'}:
         raise ValueError('Invalid net')
@@ -146,7 +148,7 @@ class HostState:
     def view(self, now):
         stale = self.last_success is None or now - self.last_success > 30 or bool(self.error)
         status = 'offline' if self.error else 'collecting' if self.stats is None else 'stale' if stale else 'online'
-        return dict(id=self.host['id'], label=self.host['label'], stats=self.stats, status=status, stale=stale, error=self.error,
+        return dict(id=self.host['id'], label=self.host['label'], user=self.host.get('user'), stats=self.stats, status=status, stale=stale, error=self.error,
                     netRate=self._net_rate,
                     lastSuccess=self.last_success * 1000 if self.last_success is not None else None,
                     lastAttempt=self.last_attempt * 1000 if self.last_attempt is not None else None)
