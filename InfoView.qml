@@ -733,6 +733,10 @@ Item {
     property string value: ""
     property real fraction: 0
     property color tone: Color.accent
+    // Repeater-delegate meters are recreated on every refresh; animating the
+    // fill width turns the creation-time layout transient into a visible spike.
+    // Static cockpit meters keep the glide (animateFill defaults to true).
+    property bool animateFill: true
     implicitHeight: mrow.implicitHeight + bar.height + Style.spacing.xs
     width: parent ? parent.width : 200
     RowLayout {
@@ -751,7 +755,7 @@ Item {
       Rectangle {
         width: parent.width * Math.max(0, Math.min(1, fraction))
         height: parent.height; radius: parent.radius; color: tone
-        Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: animateFill; NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
       }
     }
   }
@@ -1942,7 +1946,7 @@ Item {
                 model: ((mc.hw.stats || {}).gpus || []).filter(function (g) { return g.driver !== "i915" })
                 delegate: Meter {
                   required property var modelData
-                  Layout.fillWidth: true; Layout.preferredWidth: 1
+                  Layout.fillWidth: true; Layout.preferredWidth: 1; animateFill: false
                   label: "GPU " + modelData.id + " " + modelData.name
                   value: view.desk.pct(modelData.util) + (modelData.memTotal ? " · " + view.desk.bytes(modelData.memUsed) + "/" + view.desk.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
                   fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : (Number(modelData.util) || 0) / 100
@@ -1951,7 +1955,7 @@ Item {
               }
               Repeater {
                 model: mc.disks.slice(0, 2)
-                delegate: Meter { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; label: "DISK " + modelData.mount; value: view.desk.bytes(modelData.used) + "/" + view.desk.bytes(modelData.size) + " · " + view.desk.pct(modelData.pct); fraction: (modelData.pct || 0) / 100; tone: (modelData.pct || 0) > 90 ? view.desk.red : view.desk.yellow }
+                delegate: Meter { required property var modelData; Layout.fillWidth: true; Layout.preferredWidth: 1; animateFill: false; label: "DISK " + modelData.mount; value: view.desk.bytes(modelData.used) + "/" + view.desk.bytes(modelData.size) + " · " + view.desk.pct(modelData.pct); fraction: (modelData.pct || 0) / 100; tone: (modelData.pct || 0) > 90 ? view.desk.red : view.desk.yellow }
               }
               Meter {
                 Layout.fillWidth: true; Layout.preferredWidth: 1

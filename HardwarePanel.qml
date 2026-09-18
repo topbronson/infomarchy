@@ -33,6 +33,10 @@ Flickable {
     required property string value
     required property real fraction
     required property color tone
+    // Repeater-delegate bars are recreated on every refresh; animating the fill
+    // width turns the creation-time layout transient into a visible spike. Static
+    // CPU/RAM bars keep the glide (animateFill defaults to true).
+    property bool animateFill: true
     implicitHeight: mrow.implicitHeight + track.height + root.style.spacing.xs
     width: parent ? parent.width : 200
     RowLayout {
@@ -51,7 +55,7 @@ Flickable {
       Rectangle {
         width: parent.width * Math.max(0, Math.min(1, fraction))
         height: parent.height; radius: parent.radius; color: tone
-        Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: animateFill; NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
       }
     }
   }
@@ -122,7 +126,7 @@ Flickable {
             model: hostBlock.disks.slice(0, 2)
             delegate: Bar {
               required property var modelData
-              Layout.fillWidth: true; Layout.preferredWidth: 1
+              Layout.fillWidth: true; Layout.preferredWidth: 1; animateFill: false
               label: "DISK " + modelData.mount
               value: root.bytes(modelData.used) + "/" + root.bytes(modelData.total)
               fraction: Number(modelData.total) > 0 ? Number(modelData.used) / Number(modelData.total) : 0
@@ -136,7 +140,7 @@ Flickable {
             model: hostBlock.gpus
             delegate: Bar {
               required property var modelData
-              Layout.fillWidth: true; Layout.preferredWidth: 1
+              Layout.fillWidth: true; Layout.preferredWidth: 1; animateFill: false
               label: "GPU " + modelData.id + " " + modelData.name
               value: root.pct(modelData.util) + (modelData.memTotal ? " · " + root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
               fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : ((Number(modelData.util) || 0) / 100)
