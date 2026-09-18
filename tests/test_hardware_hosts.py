@@ -32,7 +32,7 @@ class HostsTests(unittest.TestCase):
         self.assertTrue(hasattr(h, 'HostState'), 'host state required')
         state = h.HostState({'id': 'local', 'label': 'Local'})
         self.assertEqual(state.view(100)['status'], 'collecting')
-        stats = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': []}
+        stats = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}}
         state.update(stats, '', 100)
         self.assertEqual(state.view(101)['status'], 'online')
         self.assertEqual(state.view(140)['status'], 'stale')
@@ -54,7 +54,10 @@ class HostsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             h.run_bounded([sys.executable, '-c', 'print("x" * 200000)'], b'')
         self.assertEqual(h.run_bounded([sys.executable, '-c', 'print(42)'], b''), '42\n')
-        for bad in [{}, {'cpu': {'pct': 'bad'}, 'mem': {}, 'disks': [], 'gpus': []}, {'cpu': {}, 'mem': {}, 'disks': [], 'gpus': [], 'sessions': []}]:
+        good = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}}
+        self.assertIsNotNone(h.validate_stats(good), 'valid full stats must pass')
+        for bad in [{}, {'cpu': {'pct': 'bad'}, 'mem': {}, 'disks': [], 'gpus': []}, {'cpu': {}, 'mem': {}, 'disks': [], 'gpus': [], 'sessions': []},
+                    {**good, 'net': {'dev': 'eth0'}}, {**good, 'ping': {'ok': 'yes'}}]:
             with self.assertRaises(ValueError):
                 h.validate_stats(bad)
 
@@ -62,7 +65,7 @@ class HostsTests(unittest.TestCase):
         h = self.load()
         self.assertTrue(hasattr(h, 'Monitor'), 'parallel monitor required')
         import concurrent.futures
-        stats = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': []}
+        stats = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}}
         class Executor:
             def __init__(self):
                 self.jobs = []

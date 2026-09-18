@@ -68,7 +68,7 @@ def validate_stats(stats):
         if not isinstance(value, str) or len(value) > 256 or any(ord(c) < 32 for c in value):
             raise ValueError('Invalid hardware label')
 
-    if not isinstance(stats, dict) or set(stats) != {'cpu', 'mem', 'disks', 'gpus'}:
+    if not isinstance(stats, dict) or set(stats) != {'cpu', 'mem', 'disks', 'gpus', 'uptime', 'net', 'ping'}:
         raise ValueError('Not a hardware-only snapshot')
     metrics(stats['cpu'], ['pct'])
     metrics(stats['mem'], ['used', 'total'])
@@ -93,6 +93,26 @@ def validate_stats(stats):
         metrics({k: gpu[k] for k in fields}, fields)
         if gpu['util'] is not None and gpu['util'] > 100:
             raise ValueError('Invalid GPU percentage')
+    if stats['uptime'] is not None and (type(stats['uptime']) not in (int, float) or not math.isfinite(stats['uptime']) or stats['uptime'] < 0):
+        raise ValueError('Invalid uptime')
+    net = stats['net']
+    if not isinstance(net, dict) or set(net) != {'dev', 'addr', 'wan', 'rx', 'tx', 'wireless', 'ssid', 'signal'}:
+        raise ValueError('Invalid net')
+    for key in ('dev', 'addr', 'wan', 'ssid'):
+        if net[key] is not None:
+            label(net[key])
+    for key in ('rx', 'tx', 'signal'):
+        if net[key] is not None and (type(net[key]) not in (int, float) or not math.isfinite(net[key]) or not 0 <= net[key] <= 1e18):
+            raise ValueError('Invalid net number')
+    if not isinstance(net['wireless'], bool):
+        raise ValueError('Invalid net wireless')
+    ping = stats['ping']
+    if not isinstance(ping, dict) or set(ping) != {'ok', 'ms'}:
+        raise ValueError('Invalid ping')
+    if not isinstance(ping['ok'], bool):
+        raise ValueError('Invalid ping ok')
+    if ping['ms'] is not None and (type(ping['ms']) not in (int, float) or not math.isfinite(ping['ms']) or not 0 <= ping['ms'] <= 1e6):
+        raise ValueError('Invalid ping ms')
     return stats
 
 
@@ -103,6 +123,8 @@ class HostState:
         self.last_success = None
         self.last_attempt = None
         self.error = ''
+        self._net_prev = None
+        self._net_rate = None
 
     def update(self, stats, error, stamp):
         self.last_attempt = stamp
@@ -110,11 +132,22 @@ class HostState:
         if stats is not None:
             self.stats = validate_stats(stats)
             self.last_success = stamp
+            net = stats.get('net') or {}
+            rx, tx = net.get('rx'), net.get('tx')
+            if rx is not None and tx is not None:
+                if self._net_prev is not None:
+                    prx, ptx, pstamp = self._net_prev
+                    dt = stamp - pstamp
+                    self._net_rate = (max(0.0, (rx - prx) / dt), max(0.0, (tx - ptx) / dt)) if dt > 0 else None
+                else:
+                    self._net_rate = None
+                self._net_prev = (rx, tx, stamp)
 
     def view(self, now):
         stale = self.last_success is None or now - self.last_success > 30 or bool(self.error)
         status = 'offline' if self.error else 'collecting' if self.stats is None else 'stale' if stale else 'online'
         return dict(id=self.host['id'], label=self.host['label'], stats=self.stats, status=status, stale=stale, error=self.error,
+                    netRate=self._net_rate,
                     lastSuccess=self.last_success * 1000 if self.last_success is not None else None,
                     lastAttempt=self.last_attempt * 1000 if self.last_attempt is not None else None)
 

@@ -12,6 +12,7 @@ GPU sources, in order of preference per card:
   - Fallback: /sys (PCI identity + temp only)
 """
 import csv
+import os
 import json
 import math
 import re
@@ -200,6 +201,83 @@ def disks(mounts_text=None):
     return rows[:32]
 
 
+def net_info():
+    """Primary interface: dev, LAN addr, WAN (external) IP, cumulative rx/tx
+    bytes, and wireless info. The monitor turns rx/tx into rates between ticks."""
+    dev = None
+    try:
+        out = subprocess.run(["ip", "route", "get", "1.1.1.1"], capture_output=True, text=True, timeout=1).stdout
+        m = re.search(r"dev (\S+)", out)
+        if m:
+            dev = m.group(1)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if not dev:
+        try:
+            for name in sorted(os.listdir("/sys/class/net")):
+                if name == "lo":
+                    continue
+                if number(text(Path("/sys/class/net") / name / "statistics" / "rx_bytes")) or number(text(Path("/sys/class/net") / name / "statistics" / "tx_bytes")):
+                    dev = name
+                    break
+        except OSError:
+            pass
+    if not dev:
+        return dict(dev=None, addr=None, wan=None, rx=None, tx=None, wireless=False, ssid=None, signal=None)
+    stats = Path("/sys/class/net") / dev / "statistics"
+    rx, tx = number(text(stats / "rx_bytes")), number(text(stats / "tx_bytes"))
+    addr = None
+    try:
+        out = subprocess.run(["ip", "-4", "-j", "addr", "show", dev], capture_output=True, text=True, timeout=1).stdout
+        for a in json.loads(out)[0].get("addr_info", []):
+            if a.get("family") in ("inet", "inet4"):
+                addr = a.get("local")
+                break
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, IndexError):
+        pass
+    wireless = (Path("/sys/class/net") / dev / "wireless").exists()
+    ssid = signal = None
+    if wireless:
+        link = text(Path("/sys/class/net") / dev / "wireless" / "link")
+        m = re.search(r"SSID:\s*(.+)", link)
+        ssid = m.group(1).strip() if m else None
+        m = re.search(r"signal:\s*(-?\d+)", link)
+        signal = int(m.group(1)) if m else None
+    return dict(dev=dev, addr=addr, wan=external_ip(), rx=rx, tx=tx, wireless=wireless, ssid=ssid, signal=signal)
+
+
+def ping():
+    try:
+        out = subprocess.run(["ping", "-c", "1", "-W", "1", "1.1.1.1"], capture_output=True, text=True, timeout=2).stdout
+        m = re.search(r"time[=<]\s*([\d.]+)\s*ms", out)
+        ok = "0% packet loss" in out
+        return dict(ok=ok, ms=float(m.group(1)) if m else None)
+    except (OSError, subprocess.TimeoutExpired):
+        return dict(ok=False, ms=None)
+
+
+def external_ip():
+    try:
+        import urllib.request
+        req = urllib.request.Request("https://1.1.1.1/cdn-cgi/trace", headers={"User-Agent": "infomarchy"})
+        with urllib.request.urlopen(req, timeout=1.2) as r:
+            trace = r.read(4096).decode("utf-8", "replace")
+        for line in trace.splitlines():
+            if line.startswith("ip="):
+                ip = line[3:].strip()
+                return ip if re.fullmatch(r"[0-9a-fA-F.:]+", ip) else None
+    except Exception:
+        pass
+    return None
+
+
+def uptime():
+    try:
+        return float(text(Path("/proc/uptime")).split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def snapshot():
     def ticks():
         values = [int(n) for n in text(Path('/proc/stat')).splitlines()[0].split()[1:9]]
@@ -222,7 +300,8 @@ def snapshot():
     available = memory.get('MemAvailable')
     return dict(cpu=dict(pct=pct),
                 mem=dict(total=total, used=total - available if total is not None and available is not None else None),
-                disks=disks(), gpus=gpus()[:16])
+                disks=disks(), gpus=gpus()[:16],
+                uptime=uptime(), net=net_info(), ping=ping())
 
 
 if __name__ == '__main__':

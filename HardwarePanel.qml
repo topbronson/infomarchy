@@ -148,6 +148,44 @@ Flickable {
           text: "GPU · none detected"
           color: root.desk.themeForeground; opacity: 0.5; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption
         }
+
+        // Footer: addresses + uptime, then rates · ping (mirrors the cockpit).
+        RowLayout {
+          visible: !!hostBlock.modelData.stats
+          width: parent.width
+          spacing: root.style.spacing.md
+          Text {
+            text: "WAN " + ((hostBlock.stats.net || {}).wan || "—")
+            color: (hostBlock.stats.net || {}).wan ? root.desk.cyan : root.desk.themeForeground
+            opacity: 0.7; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; elide: Text.ElideMiddle
+          }
+          Text {
+            visible: !!(hostBlock.stats.net || {}).addr
+            text: "LAN " + (hostBlock.stats.net || {}).addr
+            color: root.desk.themeForeground; opacity: 0.6; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; elide: Text.ElideMiddle
+          }
+          Text {
+            visible: hostBlock.stats.uptime !== null && hostBlock.stats.uptime !== undefined
+            text: "up " + root.desk.dur(hostBlock.stats.uptime)
+            color: root.desk.themeForeground; opacity: 0.6; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption
+          }
+          Item { Layout.fillWidth: true }
+        }
+        RowLayout {
+          visible: !!hostBlock.modelData.stats
+          width: parent.width
+          spacing: root.style.spacing.md
+          Text {
+            text: "↓" + root.desk.rate(hostBlock.modelData.netRate ? hostBlock.modelData.netRate[0] : null) + " ↑" + root.desk.rate(hostBlock.modelData.netRate ? hostBlock.modelData.netRate[1] : null)
+            color: root.desk.green; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
+          }
+          Text {
+            text: "⇄ " + (((hostBlock.stats.ping || {}).ok) ? ((hostBlock.stats.ping || {}).ms).toFixed(0) + " ms" : "timeout")
+            color: !((hostBlock.stats.ping || {}).ok) ? root.desk.red : (((hostBlock.stats.ping || {}).ms || 0) > 80 ? root.desk.yellow : root.desk.green)
+            textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
+          }
+          Item { Layout.fillWidth: true }
+        }
       }
     }
   }
