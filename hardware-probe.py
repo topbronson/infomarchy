@@ -271,6 +271,33 @@ def external_ip():
     return None
 
 
+def load_average():
+    try:
+        return round(float(os.getloadavg()[0]), 2)
+    except (OSError, ValueError):
+        return None
+
+
+def cpu_temp():
+    # Package CPU temp from the platform thermal zone (acpitz on x86, acpi_thermal
+    # on ARM). Raw values are millidegrees, so divide by 1000. Returns Celsius or
+    # None (never the bogus 5-digit millidegree figure).
+    best = None
+    for path in sorted(Path('/sys/class/thermal').glob('thermal_zone*')):
+        try:
+            ztype = text(path / 'type')
+        except OSError:
+            continue
+        if ztype not in ('acpitz', 'acpi_thermal'):
+            continue
+        t = number(text(path / 'temp'))
+        if t is not None:
+            t = t / 1000
+        if t is not None and (best is None or t > best):
+            best = t
+    return best
+
+
 def hostname():
     try:
         import socket
@@ -312,7 +339,7 @@ def snapshot():
             memory[key] = int(parts[0]) * 1024
     total = memory.get('MemTotal')
     available = memory.get('MemAvailable')
-    return dict(cpu=dict(pct=pct),
+    return dict(cpu=dict(pct=pct, load=load_average(), temp=cpu_temp()),
                 mem=dict(total=total, used=total - available if total is not None and available is not None else None),
                 disks=disks(), gpus=gpus()[:16],
                 uptime=uptime(), net=net_info(), ping=ping(),

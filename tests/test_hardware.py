@@ -95,6 +95,8 @@ class HardwareTests(unittest.TestCase):
         self.assertTrue(sample['disks'])
         self.assertGreaterEqual(sample['cpu']['pct'], 0)
         self.assertLessEqual(sample['cpu']['pct'], 100)
+        self.assertIn('load', sample['cpu'])
+        self.assertIn('temp', sample['cpu'])
 
 if __name__ == '__main__':
     unittest.main()

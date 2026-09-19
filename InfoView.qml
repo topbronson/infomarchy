@@ -742,9 +742,9 @@ Item {
     RowLayout {
       id: mrow
       width: parent.width
-      PlainText { text: label; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.55) }
+      PlainText { text: label; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.34) }
       Item { Layout.fillWidth: true; Layout.minimumWidth: Style.spacing.sm }
-      PlainText { text: value; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; horizontalAlignment: Text.AlignRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.7) }
+      PlainText { text: value; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; horizontalAlignment: Text.AlignRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.66) }
     }
     Rectangle {
       id: bar
@@ -758,6 +758,21 @@ Item {
         Behavior on width { enabled: animateFill; NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
       }
     }
+  }
+
+
+  // Short, unique GPU tag: model code + PCI bus so two identical cards stay
+  // distinguishable without the full "0000:04:00.0 Intel Arc Pro B70" label.
+  function gpuTag(g) {
+    var base = String((g && g.name) || "GPU").replace(/^Intel /, "").replace(/^NVIDIA /, "").replace(/^AMD /, "")
+    var tag
+    if (base.indexOf("B70") >= 0) tag = "B70"
+    else if (base.indexOf("GB10") >= 0) tag = "GB10"
+    else if (base.indexOf("A770") >= 0) tag = "A770"
+    else tag = base.split(" ").slice(0, 2).join(" ")
+    var parts = String((g && g.id) || "").split(":")
+    var bus = parts.length > 1 ? parts[1] : ""
+    return tag + (bus ? " · " + bus : "")
   }
 
   component Tag: Rectangle {
@@ -1947,8 +1962,8 @@ Item {
                 delegate: Meter {
                   required property var modelData
                   Layout.fillWidth: true; Layout.preferredWidth: 1; animateFill: false
-                  label: "GPU " + modelData.id + " " + modelData.name
-                  value: view.desk.pct(modelData.util) + (modelData.memTotal ? " · " + view.desk.bytes(modelData.memUsed) + "/" + view.desk.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
+                  label: view.gpuTag(modelData)
+                  value: (modelData.memTotal ? view.desk.bytes(modelData.memUsed) + "/" + view.desk.bytes(modelData.memTotal) + " · " : "") + view.desk.pct(modelData.util) + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
                   fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : (Number(modelData.util) || 0) / 100
                   tone: view.desk.green
                 }

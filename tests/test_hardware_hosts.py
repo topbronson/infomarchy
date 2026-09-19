@@ -32,7 +32,7 @@ class HostsTests(unittest.TestCase):
         self.assertTrue(hasattr(h, 'HostState'), 'host state required')
         state = h.HostState({'id': 'local', 'label': 'Local'})
         self.assertEqual(state.view(100)['status'], 'collecting')
-        stats = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
+        stats = {'cpu': {'pct': 10, 'load': 1.5, 'temp': 45.0}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
         state.update(stats, '', 100)
         self.assertEqual(state.view(101)['status'], 'online')
         self.assertEqual(state.view(140)['status'], 'stale')
@@ -54,7 +54,7 @@ class HostsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             h.run_bounded([sys.executable, '-c', 'print("x" * 200000)'], b'')
         self.assertEqual(h.run_bounded([sys.executable, '-c', 'print(42)'], b''), '42\n')
-        good = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
+        good = {'cpu': {'pct': 10, 'load': 1.5, 'temp': 45.0}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
         self.assertIsNotNone(h.validate_stats(good), 'valid full stats must pass')
         for bad in [{}, {'cpu': {'pct': 'bad'}, 'mem': {}, 'disks': [], 'gpus': []}, {'cpu': {}, 'mem': {}, 'disks': [], 'gpus': [], 'sessions': []},
                     {**good, 'net': {'dev': 'eth0'}}, {**good, 'ping': {'ok': 'yes'}}]:
@@ -65,7 +65,7 @@ class HostsTests(unittest.TestCase):
         h = self.load()
         self.assertTrue(hasattr(h, 'Monitor'), 'parallel monitor required')
         import concurrent.futures
-        stats = {'cpu': {'pct': 10}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
+        stats = {'cpu': {'pct': 10, 'load': 1.5, 'temp': 45.0}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
         class Executor:
             def __init__(self):
                 self.jobs = []
@@ -87,6 +87,50 @@ class HostsTests(unittest.TestCase):
         self.assertEqual(executor.jobs[-1][0]['id'], 'local')
         monitor.tick(106)
         self.assertEqual(len(executor.jobs), 3, 'one in-flight job per host')
+
+
+    def test_paused_hosts_skip_collection(self):
+        import importlib.util
+        import pathlib
+        import tempfile
+        import json
+        spec = importlib.util.spec_from_file_location('hh', pathlib.Path(__file__).resolve().parents[1] / 'hardware-hosts.py')
+        h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(h)
+        stats = {'cpu': {'pct': 10, 'load': 1.5, 'temp': 45.0}, 'mem': {'used': 1, 'total': 2}, 'disks': [], 'gpus': [], 'uptime': 100.0, 'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None}, 'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
+        with tempfile.TemporaryDirectory() as directory:
+            paused_path = pathlib.Path(directory) / 'hardware-paused.json'
+            paused_path.write_text(json.dumps([]))
+            jobs = []
+
+            class Executor:
+                def submit(self, fn, host):
+                    jobs.append(host['id'])
+                    import concurrent.futures
+                    f = concurrent.futures.Future()
+                    f.set_result(stats)
+                    return f
+
+            monitor = h.Monitor([{'id': 'spark', 'label': 'Spark'}], Executor(), paused_path=str(paused_path))
+            monitor.tick(100.0)   # submit local + spark (in flight)
+            monitor.tick(105.0)   # harvest: both online
+            self.assertEqual(monitor.rows(105.0)[1]['status'], 'online')
+            # Pause spark: only local is collected; spark keeps last-good stats.
+            paused_path.write_text(json.dumps(['spark']))
+            monitor.tick(110.0)
+            self.assertEqual(jobs[-1], 'local', 'paused host must not be re-collected')
+            row = monitor.rows(110.0)[1]
+            self.assertEqual(row['status'], 'paused')
+            self.assertTrue(row['paused'])
+            self.assertIsNotNone(row['stats'], 'last-good data retained while paused')
+            # Resume: spark is collected, then harvested back to online.
+            paused_path.write_text(json.dumps([]))
+            monitor.tick(115.0)
+            self.assertEqual(jobs[-1], 'spark', 'resumed host is collected again')
+            monitor.tick(120.0)
+            row = monitor.rows(120.0)[1]
+            self.assertEqual(row['status'], 'online')
+            self.assertFalse(row['paused'])
 
 if __name__ == '__main__':
     unittest.main()

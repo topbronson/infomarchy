@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 // Remote-host hardware meters, styled to match the MACHINE card cockpit.
 // The LOCAL host is intentionally NOT shown here: its CPU/RAM/disk/GPU already
@@ -26,6 +27,18 @@ Flickable {
   function bytes(value) { return value === null || value === undefined ? "—" : desk.bytes(value) }
   function pct(value) { return value === null || value === undefined ? "—" : Math.round(Number(value)) + "%" }
 
+  function gpuTag(g) {
+    var base = String((g && g.name) || "GPU").replace(/^Intel /, "").replace(/^NVIDIA /, "").replace(/^AMD /, "")
+    var tag
+    if (base.indexOf("B70") >= 0) tag = "B70"
+    else if (base.indexOf("GB10") >= 0) tag = "GB10"
+    else if (base.indexOf("A770") >= 0) tag = "A770"
+    else tag = base.split(" ").slice(0, 2).join(" ")
+    var parts = String((g && g.id) || "").split(":")
+    var bus = parts.length > 1 ? parts[1] : ""
+    return tag + (bus ? " \u00b7 " + bus : "")
+  }
+
   // A single meter: label + value on top, colored fill bar below. Mirrors the
   // MACHINE card Meter component so the two read as one system.
   component Bar: Item {
@@ -42,9 +55,9 @@ Flickable {
     RowLayout {
       id: mrow
       width: parent.width
-      Text { text: label; color: root.desk.themeForeground; opacity: 0.62; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.bodySmall; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.55) }
+      Text { text: label; color: root.desk.themeForeground; opacity: 0.62; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.bodySmall; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.34) }
       Item { Layout.fillWidth: true; Layout.minimumWidth: root.style.spacing.sm }
-      Text { text: value; color: root.desk.themeForeground; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.bodySmall; elide: Text.ElideRight; horizontalAlignment: Text.AlignRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.7) }
+      Text { text: value; color: root.desk.themeForeground; textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.bodySmall; elide: Text.ElideRight; horizontalAlignment: Text.AlignRight; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: Math.round(parent.width * 0.66) }
     }
     Rectangle {
       id: track
@@ -77,6 +90,7 @@ Flickable {
         readonly property var disks: hostBlock.stats.disks || []
         readonly property var gpus: hostBlock.stats.gpus || []
         readonly property bool offline: modelData.status === "offline"
+        readonly property bool paused: modelData.status === "paused"
         readonly property bool stale: modelData.stale || root.monitor.stale
         // "user@hostname" like the cockpit's "top-bronson@omarchy-station".
         readonly property string hostName: hostBlock.stats.hostname || hostBlock.modelData.label
@@ -90,13 +104,20 @@ Flickable {
           spacing: root.style.spacing.xs
           Rectangle {
             width: 8; height: 8; radius: 4
-            color: hostBlock.offline ? root.desk.red : (hostBlock.stale ? root.desk.yellow : root.desk.green)
+            color: hostBlock.paused ? Qt.rgba(1, 1, 1, 0.35) : (hostBlock.offline ? root.desk.red : (hostBlock.stale ? root.desk.yellow : root.desk.green))
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -8
+              property bool hover: containsMouse
+              cursorShape: hover ? Cursor.PointingHand : Cursor.Arrow
+              onClicked: root.monitor.togglePause(hostBlock.modelData.id, !hostBlock.paused)
+            }
           }
           Text {
             text: hostBlock.headerText
               + (hostBlock.stats.uptime ? " · up " + root.desk.dur(hostBlock.stats.uptime) : "")
-              + (hostBlock.offline ? " · offline" : (hostBlock.stale ? " · stale" : ""))
-            color: hostBlock.offline ? root.desk.red : (hostBlock.stale ? root.desk.yellow : root.desk.themeForeground)
+              + (hostBlock.paused ? " · paused" : (hostBlock.offline ? " · offline" : (hostBlock.stale ? " · stale" : "")))
+            color: hostBlock.paused ? Qt.rgba(1, 1, 1, 0.5) : (hostBlock.offline ? root.desk.red : (hostBlock.stale ? root.desk.yellow : root.desk.themeForeground))
             textFormat: Text.PlainText; font.family: root.style.resolvedFontFamily; font.pixelSize: root.style.font.caption; font.bold: true
             Layout.fillWidth: true; Layout.minimumWidth: 0; elide: Text.ElideRight
           }
@@ -113,13 +134,14 @@ Flickable {
         // Meters in a 2-column grid so each bar is half-width, matching the cockpit.
         GridLayout {
           visible: !!hostBlock.modelData.stats
+          opacity: hostBlock.paused ? 0.45 : 1.0
           width: parent.width
           columns: 2
           columnSpacing: root.style.spacing.lg
           rowSpacing: root.style.spacing.sm
 
-          Bar { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "CPU"; value: root.pct(hostBlock.cpu.pct); fraction: (Number(hostBlock.cpu.pct) || 0) / 100; tone: (Number(hostBlock.cpu.pct) || 0) > 85 ? root.desk.red : root.desk.blue }
-          Bar { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "RAM"; value: root.bytes(hostBlock.mem.used) + "/" + root.bytes(hostBlock.mem.total); fraction: Number(hostBlock.mem.total) > 0 ? Number(hostBlock.mem.used) / Number(hostBlock.mem.total) : 0; tone: (Number(hostBlock.mem.total) > 0 && Number(hostBlock.mem.used) / Number(hostBlock.mem.total) > 0.9) ? root.desk.red : root.desk.green }
+          Bar { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "CPU"; value: root.pct(hostBlock.cpu.pct) + (hostBlock.cpu.load !== null && hostBlock.cpu.load !== undefined ? " · " + Number(hostBlock.cpu.load).toFixed(2) : "") + (hostBlock.cpu.temp !== null && hostBlock.cpu.temp !== undefined ? " · " + Math.round(hostBlock.cpu.temp) + "°" : ""); fraction: (Number(hostBlock.cpu.pct) || 0) / 100; tone: (Number(hostBlock.cpu.pct) || 0) > 85 ? root.desk.red : root.desk.blue }
+          Bar { Layout.fillWidth: true; Layout.preferredWidth: 1; label: "RAM"; value: root.bytes(hostBlock.mem.used) + "/" + root.bytes(hostBlock.mem.total) + (Number(hostBlock.mem.total) > 0 ? " · " + Math.round(100 * Number(hostBlock.mem.used) / Number(hostBlock.mem.total)) + "%" : ""); fraction: Number(hostBlock.mem.total) > 0 ? Number(hostBlock.mem.used) / Number(hostBlock.mem.total) : 0; tone: (Number(hostBlock.mem.total) > 0 && Number(hostBlock.mem.used) / Number(hostBlock.mem.total) > 0.9) ? root.desk.red : root.desk.green }
 
           // Disks (top 2, matching the cockpit).
           Repeater {
@@ -141,8 +163,8 @@ Flickable {
             delegate: Bar {
               required property var modelData
               Layout.fillWidth: true; Layout.preferredWidth: 1; animateFill: false
-              label: "GPU " + modelData.id + " " + modelData.name
-              value: root.pct(modelData.util) + (modelData.memTotal ? " · " + root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) : "") + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
+              label: root.gpuTag(modelData)
+              value: (modelData.memTotal ? root.bytes(modelData.memUsed) + "/" + root.bytes(modelData.memTotal) + " · " : "") + root.pct(modelData.util) + " · " + (modelData.temp === null || modelData.temp === undefined ? "—" : Math.round(modelData.temp) + "°")
               fraction: modelData.memTotal ? Number(modelData.memUsed) / Number(modelData.memTotal) : ((Number(modelData.util) || 0) / 100)
               tone: root.desk.green
             }

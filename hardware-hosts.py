@@ -70,7 +70,7 @@ def validate_stats(stats):
 
     if not isinstance(stats, dict) or set(stats) != {'cpu', 'mem', 'disks', 'gpus', 'uptime', 'net', 'ping', 'hostname'}:
         raise ValueError('Not a hardware-only snapshot')
-    metrics(stats['cpu'], ['pct'])
+    metrics(stats['cpu'], ['pct', 'load', 'temp'])
     metrics(stats['mem'], ['used', 'total'])
     if stats['cpu']['pct'] is not None and stats['cpu']['pct'] > 100:
         raise ValueError('Invalid CPU percentage')
@@ -97,6 +97,10 @@ def validate_stats(stats):
         raise ValueError('Invalid uptime')
     if stats['hostname'] is not None:
         label(stats['hostname'])
+    if stats['cpu']['load'] is not None and stats['cpu']['load'] > 1e6:
+        raise ValueError('Invalid CPU load')
+    if stats['cpu']['temp'] is not None and stats['cpu']['temp'] > 500:
+        raise ValueError('Invalid CPU temperature')
     net = stats['net']
     if not isinstance(net, dict) or set(net) != {'dev', 'addr', 'wan', 'rx', 'tx', 'wireless', 'ssid', 'signal'}:
         raise ValueError('Invalid net')
@@ -119,8 +123,9 @@ def validate_stats(stats):
 
 
 class HostState:
-    def __init__(self, host):
+    def __init__(self, host, paused=False):
         self.host = host
+        self.paused = paused
         self.stats = None
         self.last_success = None
         self.last_attempt = None
@@ -147,8 +152,8 @@ class HostState:
 
     def view(self, now):
         stale = self.last_success is None or now - self.last_success > 30 or bool(self.error)
-        status = 'offline' if self.error else 'collecting' if self.stats is None else 'stale' if stale else 'online'
-        return dict(id=self.host['id'], label=self.host['label'], user=self.host.get('user'), stats=self.stats, status=status, stale=stale, error=self.error,
+        status = 'paused' if self.paused else 'offline' if self.error else 'collecting' if self.stats is None else 'stale' if stale else 'online'
+        return dict(id=self.host['id'], label=self.host['label'], user=self.host.get('user'), stats=self.stats, status=status, stale=stale, error=self.error, paused=self.paused,
                     netRate=self._net_rate,
                     lastSuccess=self.last_success * 1000 if self.last_success is not None else None,
                     lastAttempt=self.last_attempt * 1000 if self.last_attempt is not None else None)
@@ -178,15 +183,31 @@ def collect(host):
 
 
 class Monitor:
-    def __init__(self, hosts, executor):
+    def __init__(self, hosts, executor, paused_path=None):
         self.states = [HostState({'id': 'local', 'label': 'Local hardware'})] + [HostState(host) for host in hosts]
         self.executor = executor
         self.pending = {}
         self.due = {}
+        self.paused_path = paused_path
+        self.paused = set()
 
     def tick(self, now):
+        if self.paused_path is not None:
+            try:
+                self.paused = read_paused(self.paused_path)
+            except (OSError, ValueError):
+                self.paused = set()
         for state in self.states:
             key = state.host['id']
+            state.paused = key in self.paused
+            if state.paused:
+                # Paused hosts are skipped: no probe, no SSH, keep the last good
+                # data, and report status "paused" until re-enabled.
+                if key in self.pending:
+                    del self.pending[key]
+                state.update(None, '', now)
+                self.due[key] = 0
+                continue
             future = self.pending.get(key)
             if future is not None and future.done():
                 try:
@@ -200,6 +221,24 @@ class Monitor:
 
     def rows(self, now):
         return [state.view(now) for state in self.states]
+
+
+def read_paused(path):
+    import stat
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return set()
+    with os.fdopen(fd, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('Hardware paused file must be a regular file')
+        raw = stream.read(4097)
+        if len(raw) > 4096:
+            raise ValueError('Hardware paused file exceeds 4 KiB')
+    data = json.loads(raw or b'[]')
+    if not isinstance(data, list) or any(not isinstance(x, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,31}', x) for x in data):
+        raise ValueError('Invalid hardware paused file')
+    return set(data)
 
 
 def read_config(path):
@@ -229,7 +268,8 @@ def main():
     except (OSError, ValueError) as exc:
         hosts, error = [], 'Hardware config: ' + str(exc)[:256]
     with ThreadPoolExecutor(max_workers=5) as executor:
-        monitor = Monitor(hosts, executor)
+        monitor = Monitor(hosts, executor,
+                          paused_path=str(Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'infomarchy/hardware-paused.json'))
         while True:
             now = time.time()
             monitor.tick(now)

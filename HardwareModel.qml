@@ -34,6 +34,21 @@ Item {
     }
     onExited: function(code) { if (root.active) root.error = "Hardware worker stopped (" + code + "); python3 is required" }
   }
+  // Toggling a host's pause state rewrites a tiny JSON sidecar the monitor
+  // re-reads every second; the worker applies it on its next cycle.
+  Process {
+    id: toggler
+    property string targetHost: ""
+    property bool targetOn: false
+    command: targetHost ? ["python3", pauseScript, targetHost, targetOn ? "on" : "off"] : []
+  }
+  readonly property string pauseScript: decodeURIComponent(Qt.resolvedUrl("set-host-paused.py").toString().replace(/^file:\/\//, ""))
+  function togglePause(hostId, on) {
+    toggler.targetHost = String(hostId)
+    toggler.targetOn = !!on
+    toggler.running = true
+  }
+
   Timer {
     interval: 1000
     running: root.active
