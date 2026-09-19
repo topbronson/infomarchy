@@ -78,29 +78,37 @@ def gpu_name(vendor, device):
     return VENDOR_NAMES.get(vendor, vendor) + ' ' + device
 
 
-def nvtop_gpus():
+def nvtop_gpus(max_tries=3, per_try=1.5):
     """Return a list of {util, memUsed, memTotal, temp} in nvtop enumeration
-    order (which matches PCI order). Empty if nvtop is missing or errors."""
-    try:
-        result = subprocess.run(['nvtop', '--snapshot'], capture_output=True, text=True, timeout=3)
-        if result.returncode != 0:
-            return []
-        data = json.loads(result.stdout)
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
-        return []
-    if not isinstance(data, list):
-        return []
-    rows = []
-    for d in data:
-        if not isinstance(d, dict):
+    order (which matches PCI order). Empty if nvtop is missing or errors.
+
+    nvtop --snapshot intermittently segfaults (rc 139) or emits truncated
+    JSON on Battlemage/xe, so retry a bounded number of times: a crashed call
+    is almost always good on the immediate retry.
+    """
+    for _ in range(max_tries):
+        try:
+            result = subprocess.run(['nvtop', '--snapshot'], capture_output=True, text=True, timeout=per_try)
+            if result.returncode != 0:
+                continue
+            data = json.loads(result.stdout)
+            if not isinstance(data, list):
+                continue
+            rows = []
+            for d in data:
+                if not isinstance(d, dict):
+                    continue
+                rows.append(dict(
+                    util=pct(d.get('gpu_util')),
+                    memUsed=number(d.get('mem_used')),
+                    memTotal=number(d.get('mem_total')),
+                    temp=celsius(d.get('temp')),
+                ))
+            if rows:
+                return rows
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
             continue
-        rows.append(dict(
-            util=pct(d.get('gpu_util')),
-            memUsed=number(d.get('mem_used')),
-            memTotal=number(d.get('mem_total')),
-            temp=celsius(d.get('temp')),
-        ))
-    return rows
+    return []
 
 
 def gpus(sys=Path('/sys'), nvidia_text=None, nvtop_rows=None):

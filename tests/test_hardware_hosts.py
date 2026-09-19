@@ -89,6 +89,29 @@ class HostsTests(unittest.TestCase):
         self.assertEqual(len(executor.jobs), 3, 'one in-flight job per host')
 
 
+    def test_gpu_carry_forward_on_bad_nvtop_tick(self):
+        import importlib.util
+        import pathlib
+        spec = importlib.util.spec_from_file_location('hh', pathlib.Path(__file__).resolve().parents[1] / 'hardware-hosts.py')
+        h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(h)
+        def stats_with_gpu(gpu):
+            return {'cpu': {'pct': 10, 'load': 1.5, 'temp': 45.0}, 'mem': {'used': 1, 'total': 2}, 'disks': [],
+                    'gpus': [gpu], 'uptime': 100.0,
+                    'net': {'dev': 'eth0', 'addr': '10.0.0.5', 'wan': None, 'rx': 100, 'tx': 200, 'wireless': False, 'ssid': None, 'signal': None},
+                    'ping': {'ok': True, 'ms': 5.0}, 'hostname': 'test-host'}
+        good = {'id': '0000:04:00.0', 'name': 'Intel Arc Pro B70', 'driver': 'xe', 'util': 32.0, 'temp': 57.0, 'memUsed': 2000000000, 'memTotal': 34000000000}
+        bad = {'id': '0000:04:00.0', 'name': 'Intel Arc Pro B70', 'driver': 'xe', 'util': None, 'temp': 58.0, 'memUsed': None, 'memTotal': None}
+        state = h.HostState({'id': 'local', 'label': 'Local hardware'})
+        state.update(stats_with_gpu(dict(good)), '', 100.0)
+        state.update(stats_with_gpu(dict(bad)), '', 105.0)   # nvtop stumbled
+        g = state.stats['gpus'][0]
+        # Last-known VRAM/util carried forward; fresh temp kept.
+        self.assertEqual(g['util'], 32.0)
+        self.assertEqual(g['memUsed'], 2000000000)
+        self.assertEqual(g['memTotal'], 34000000000)
+        self.assertEqual(g['temp'], 58.0)
+
     def test_paused_hosts_skip_collection(self):
         import importlib.util
         import pathlib

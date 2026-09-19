@@ -133,11 +133,29 @@ class HostState:
         self._net_prev = None
         self._net_rate = None
 
+    def carry_forward_gpus(self, stats):
+        # A fresh probe that lost its nvtop read (intermittent segfault) comes
+        # back with null util/VRAM. Keep the last-known figures so the GPU
+        # rows don't flap to '-' between good ticks; temp still comes from
+        # /sys every time.
+        prev = self.stats
+        if not prev:
+            return stats
+        prev_gpus = {g['id']: g for g in (prev.get('gpus') or [])}
+        for g in (stats.get('gpus') or []):
+            pg = prev_gpus.get(g.get('id'))
+            if not pg:
+                continue
+            for field in ('util', 'memUsed', 'memTotal'):
+                if g.get(field) is None and pg.get(field) is not None:
+                    g[field] = pg[field]
+        return stats
+
     def update(self, stats, error, stamp):
         self.last_attempt = stamp
         self.error = error[:256].replace('\n', ' ').replace('\r', ' ')
         if stats is not None:
-            self.stats = validate_stats(stats)
+            self.stats = validate_stats(self.carry_forward_gpus(stats))
             self.last_success = stamp
             net = stats.get('net') or {}
             rx, tx = net.get('rx'), net.get('tx')
